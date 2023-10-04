@@ -1,0 +1,705 @@
+#symbol_name "Sony Bravia IP Module Ver. 3.1"
+#CATEGORY "24" // TV/Video Projector
+#PRINT_TO_TRACE
+#DEFAULT_VOLATILE
+#ENABLE_STACK_CHECKING
+#ENABLE_TRACE
+/*******************************************************************************************
+  Include Libraries
+  (Uncomment and include additional libraries as needed)
+*******************************************************************************************/
+
+#USER_SIMPLSHARP_LIBRARY "Sony_RestAPI"
+
+/*******************************************************************************************
+  DIGITAL, ANALOG and SERIAL INPUTS and OUTPUTS
+  (Uncomment and declare inputs and outputs as needed)
+*******************************************************************************************/
+DIGITAL_INPUT Connect, Disconnect, Reconnect_Enable, _skip_, _skip_, Power_On, Power_Off, _skip_,Mute_Toggle, Mute_On, Mute_Off, _skip_, InputPop, Input_TV, Input_HDMI1, Input_HDMI2, Input_HDMI3, Input_HDMI4, _skip_, Channel_Up, Channel_Down, _skip_, Volume_Up, Volume_Down, _skip_;
+DIGITAL_INPUT DPad_Up, DPad_Down, DPad_Right, DPad_Left, DPad_Ok, _skip_;
+DIGITAL_INPUT Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9, Back, Home, Top_Menu, Options, Exit, GGuide, iManual, _skip_;
+DIGITAL_INPUT Forward, Play, Rewind, Prev, Stop, Next, Pause, Rec, _skip_;
+DIGITAL_INPUT Red, Green, Yellow, Blue, _skip_;
+DIGITAL_INPUT Netflix, AppleTV, YouTube, DisneyPlus, _skip_;
+DIGITAL_INPUT Print_Logs, _skip_;
+
+
+
+ANALOG_INPUT Volume_Set;
+
+
+
+STRING_INPUT _skip_,_skip_, CustomApp[1000], _skip_, RX$[1000];
+// BUFFER_INPUT 
+
+DIGITAL_OUTPUT Connected, _skip_,_skip_, _skip_,_skip_, Power_Fb, _skip_,_skip_, Mute_Fb, _skip_ , _skip_ , _skip_ , _skip_, Input_TV_fb ,Input_HDMI_1_fb,Input_HDMI_2_fb,Input_HDMI_3_fb,Input_HDMI_4_fb;
+// ANALOG_OUTPUT 
+
+ANALOG_OUTPUT _skip_,_skip_,Volume;
+STRING_OUTPUT _skip_,_skip_, _skip_, _skip_, _skip_, _skip_, _skip_,_skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_,_skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_,_skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, TX$;
+
+/*******************************************************************************************
+  SOCKETS
+  (Uncomment and define socket definitions as needed)
+*******************************************************************************************/
+TCP_CLIENT client[16384];
+// TCP_SERVER
+// UDP_SOCKET
+
+/*******************************************************************************************
+  Parameters
+  (Uncomment and declare parameters as needed)
+*******************************************************************************************/
+INTEGER_PARAMETER _skip_, _skip_, _skip_, _skip_, _skip_,_skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_;
+INTEGER_PARAMETER _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_;
+INTEGER_PARAMETER _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_, _skip_,_skip_, _skip_, _skip_, _skip_,_skip_, _skip_, _skip_, _skip_, _skip_,_skip_, _skip_, Port;
+// SIGNED_INTEGER_PARAMETER
+// LONG_INTEGER_PARAMETER
+// SIGNED_LONG_INTEGER_PARAMETER
+STRING_PARAMETER IP_address[16], Pre_Shared_Key[20];
+
+
+#BEGIN_PARAMETER_PROPERTIES Port  
+    propDefaultValue = 20060d;
+#END_PARAMETER_PROPERTIES
+
+
+
+
+/*******************************************************************************************
+  Global Variables
+*******************************************************************************************/
+
+INTEGER vol ;
+SIGNED_INTEGER myConnectionStatus, mySocketStatus;
+STRING cmd[1000];
+
+Sony_RestAPI_Client HTTP_Driver; 	//Instance for HTTP requests Protocol
+
+
+
+
+
+/*******************************************************************************************
+  Functions
+*******************************************************************************************/
+
+
+Function printDeb(string msg, string param) {
+	
+	if(Print_Logs = 1){
+		print("%s %s",msg, param);
+	}
+
+}
+
+
+/*
+  Send Commands Function for SIMPLE IP Protocol
+
+*/
+
+Function sendData() {
+	integer socket_return_value;
+	TX$ = cmd;
+    
+
+	printDeb("Command Sent: ", cmd);
+			
+
+	socket_return_value = SocketSend(client, cmd);
+	
+	if( socket_return_value != 0 ) { // print error
+		printDeb("Socket could NOT send data with error code: ", itoa(socket_return_value));
+		Connected = 0;
+	}
+    
+}
+
+
+/*
+  Feedback Function for SIMPLE IP Protocol Notification
+
+*/
+
+
+Function receiveFB(string input) {
+	
+	string temp[500];
+	integer pos;
+	integer length;
+	
+
+
+	pos = 1;
+	length = len(input)/24;
+    
+    while(pos<=length){
+		printDeb("receiveFB: input = " , input);                      
+     			
+		temp = mid(input,(pos*24-24)+1,24);
+			
+
+		printDeb("receiveFB: temp = ", temp);
+
+		
+		if (left(temp, 8) = "*SNPOWR0") {	//Power FB
+			if (right(temp, 2) = "0\x0A"){	
+				Power_Fb = 0;
+				printDeb("ReceiveFB: Powered off!","");		
+			}
+			else if (right(temp, 2) = "1\x0A") {
+				Power_Fb = 1;
+				printDeb("ReceiveFB: Powered on!", "");
+			}
+			else{
+				printDeb ("ReceiveFB: Power status error!","");
+ 	  		}
+		}
+
+		if (left(temp, 8) = "*SNAMUT0") {	//Mute FB
+			if (right(temp, 2) = "0\x0A"){
+				Mute_Fb = 0;
+				printDeb("ReceiveFB: Mute off!","");
+			}
+			else if (right(temp, 2) = "1\x0A") {
+				Mute_Fb = 1;
+				printDeb("ReceiveFB: Mute on!","");
+		}
+		else{ 
+			printDeb("ReceiveFB: Mute status error!","");
+    	}
+	}
+        
+
+
+		if (left(temp, 16) = "*SNINPT000000010") {	//HDMI Input FB
+			if (right(temp, 2) = "1\x0A"){
+				Input_HDMI_1_fb = 1;
+				Input_HDMI_2_fb = 0;
+				Input_HDMI_3_fb = 0;
+				Input_HDMI_4_fb = 0;
+				Input_TV_fb = 0;
+				printDeb("ReceiveFB: HDMI 1 SELECTED!","");
+			}
+			else if (right(temp, 2) = "2\x0A") {
+				Input_HDMI_1_fb = 0;
+				Input_HDMI_2_fb = 1;
+				Input_HDMI_3_fb = 0;
+				Input_HDMI_4_fb = 0;
+				Input_TV_fb = 0;
+				printDeb("ReceiveFB: HDMI 2 SELECTED!","");
+			}
+			else if (right(temp, 2) = "3\x0A") {
+				Input_HDMI_1_fb = 0;
+				Input_HDMI_2_fb = 0;
+				Input_HDMI_3_fb = 1;
+				Input_HDMI_4_fb = 0;
+				Input_TV_fb = 0;
+				printDeb("ReceiveFB: HDMI 3 SELECTED!","");
+			}
+	        else if (right(temp, 2) = "4\x0A") {
+				Input_HDMI_1_fb = 0;
+				Input_HDMI_2_fb = 0;
+				Input_HDMI_3_fb = 0;
+				Input_HDMI_4_fb = 1;
+				Input_TV_fb = 0;
+				printDeb("ReceiveFB: HDMI 4 SELECTED!","");
+			}
+
+		else{
+			printDeb("ReceiveFB: HDMI INPUT error!",""); 
+	
+    		}
+		}
+         
+
+		if (left(temp, 16) = "*SNINPT000000000") {	//TV Input FB
+			if (right(temp, 2) = "0\x0A"){
+				Input_HDMI_1_fb = 0;
+				Input_HDMI_2_fb = 0;
+				Input_HDMI_3_fb = 0;
+				Input_HDMI_4_fb = 0;
+				Input_TV_fb = 1;
+				printDeb("ReceiveFB: TV Input SELECTED!","");
+			}
+		else{
+			printDeb("ReceiveFB: TV INPUT error!","");
+        	}
+		}
+
+		if (left(temp, 7) = "*SNVOLU") {		//VolumeFB
+			Volume = atoi(right(temp, 3));
+			printDeb("ReceivFB: Volume Change to %s!", temp);
+		}
+		pos = pos + 1;
+	}
+
+}
+
+
+ 
+
+
+
+/*******************************************************************************************
+  Event Handlers
+*******************************************************************************************/
+
+/*
+     TCP/IP Client Events
+
+
+*/
+
+ 
+SOCKETCONNECT client {
+	printDeb("SocketConnect: input buffer size: ", itoa(Len(client.SocketRxBuf)));
+	
+    //Poll for Initial Values
+	cmd = "*SEPOWR################\x0A";
+	sendData();
+	cmd = "*SEVOLU################\x0A";
+	sendData();
+	cmd = "*SEAMUT################\x0A";
+	sendData();
+    cmd = "*SEISRC################\x0A";
+	sendData();
+
+
+	
+}
+
+
+SOCKETDISCONNECT client {
+	printDeb("(SocketDisconnect): Socket Disconnected", "");
+
+}
+
+
+
+SOCKETRECEIVE client {
+	printDeb("SocketReceive: Received String is: ", client.SocketRxBuf);
+	receiveFB(client.SocketRxBuf);
+	ClearBuffer(client.SocketRxBuf);
+}
+
+
+SOCKETSTATUS client {
+    mySocketStatus = SocketGetStatus();
+	printDeb("SocketStatus: Changed SocketGetStatus = ", itoa(mySocketStatus));
+
+	if(mySocketStatus = 2) { //Connected
+    	Connected = 1;
+	}
+	else {
+		Connected = 0;
+		if(mySocketStatus = 4 && Reconnect_Enable = 1 ) {
+			printDeb("SocketStatus: Initiating Reconnect Procedure. SocketGetStatus = ", itoa(mySocketStatus));
+			SocketConnectClient(client, IP_address, Port, 0);
+
+			
+		}
+	}
+}
+
+
+
+
+
+/*
+  SIMPLE IP Protocol Commands
+
+*/
+
+PUSH Connect { 
+	myConnectionStatus = SocketConnectClient(client, IP_address, Port, 0);
+		// print("socket connect return value %d", myConnectionStatus);
+	
+	printDeb("Connect: SocketConnectionClient status:", itoa(myConnectionStatus));
+	if (myConnectionStatus = 0) {
+		Connected = 1;
+	}
+	else{
+		Connected = 0;
+	}
+}
+
+ 
+PUSH Disconnect {
+	
+	myConnectionStatus = SocketDisconnectClient(client);
+	if (myConnectionStatus = 0)
+		Connected = 0;
+}
+
+PUSH Power_On {
+
+	cmd = "*SCPOWR0000000000000001\x0A";
+	sendData();
+}
+
+PUSH Power_Off {
+
+	cmd = "*SCPOWR0000000000000000\x0A";
+	sendData();
+}
+
+PUSH Mute_Toggle {
+
+	cmd = "*SCIRCC0000000000000032\x0A";
+	sendData();
+}
+
+PUSH Mute_On {
+
+	cmd = "*SCAMUT0000000000000001\x0A";
+	sendData();
+}
+
+PUSH Mute_Off {
+
+	cmd = "*SCAMUT0000000000000000\x0A";
+	sendData();
+}
+
+PUSH InputPop {
+
+	cmd = "*SCIRCC0000000000000001\x0A";
+	sendData();
+}
+
+PUSH Input_TV {
+
+	cmd = "*SCINPT0000000000000000\x0A";
+	sendData();
+}
+
+PUSH Input_HDMI1 {
+
+	cmd = "*SCINPT0000000100000001\x0A";
+	sendData();
+}
+
+PUSH Input_HDMI2 {
+
+	cmd = "*SCINPT0000000100000002\x0A";
+	sendData();
+}
+
+PUSH Input_HDMI3 {
+
+	cmd = "*SCINPT0000000100000003\x0A";
+	sendData();
+}
+
+
+PUSH Input_HDMI4 {
+
+	cmd = "*SCINPT0000000100000004\x0A";
+	sendData();
+}
+
+PUSH Channel_Up {
+
+	cmd = "*SCIRCC0000000000000033\x0A";
+	sendData();
+}
+
+PUSH Channel_Down {
+
+	cmd = "*SCIRCC0000000000000034\x0A";
+	sendData();
+}
+
+PUSH DPad_Up {
+
+	cmd = "*SCIRCC0000000000000009\x0A";
+	sendData();
+}
+
+PUSH DPad_Down {
+
+	cmd = "*SCIRCC0000000000000010\x0A";
+	sendData();
+}
+
+PUSH DPad_Right {
+
+	cmd = "*SCIRCC0000000000000011\x0A";
+	sendData();
+}
+
+PUSH DPad_Left {
+
+	cmd = "*SCIRCC0000000000000012\x0A";
+	sendData();
+}
+
+PUSH DPad_Ok {
+
+	cmd = "*SCIRCC0000000000000013\x0A";
+	sendData();
+}
+
+PUSH Num0 {
+
+	cmd = "*SCIRCC0000000000000027\x0A";
+	sendData();
+}
+
+PUSH Num1 {
+
+	cmd = "*SCIRCC0000000000000018\x0A";
+	sendData();
+}
+
+PUSH Num2 {
+
+	cmd = "*SCIRCC0000000000000019\x0A";
+	sendData();
+}
+
+PUSH Num3 {
+
+	cmd = "*SCIRCC0000000000000020\x0A";
+	sendData();
+}
+
+PUSH Num4 {
+
+	cmd = "*SCIRCC0000000000000021\x0A";
+	sendData();
+}
+
+PUSH Num5 {
+
+	cmd = "*SCIRCC0000000000000022\x0A";
+	sendData();
+}
+
+PUSH Num6 {
+
+	cmd = "*SCIRCC0000000000000023\x0A";
+	sendData();
+}
+
+PUSH Num7 {
+
+	cmd = "*SCIRCC0000000000000024\x0A";
+	sendData();
+}
+
+PUSH Num8 {
+
+	cmd = "*SCIRCC0000000000000025\x0A";
+	sendData();
+}
+
+PUSH Num9 {
+
+	cmd = "*SCIRCC0000000000000026\x0A";
+	sendData();
+}
+
+PUSH Back {
+
+	cmd = "*SCIRCC0000000000000008\x0A";
+	sendData();
+}
+
+PUSH Home {
+
+	cmd = "*SCIRCC0000000000000006\x0A";
+	sendData();
+}
+
+PUSH Top_Menu {
+
+	cmd = "*SCIRCC0000000000000088\x0A";
+	sendData();
+}
+
+PUSH Options {
+
+	cmd = "*SCIRCC0000000000000007\x0A";
+	sendData();
+}
+
+PUSH Exit {
+
+	cmd = "*SCIRCC0000000000000041\x0A";
+	sendData();
+}
+
+PUSH GGuide {
+
+	cmd = "*SCIRCC0000000000000002\x0A";
+	sendData();
+}
+ 
+PUSH iManual {
+
+	cmd = "*SCIRCC0000000000000059\x0A";
+	sendData();
+}
+
+PUSH Forward {
+
+	cmd = "*SCIRCC0000000000000077\x0A";
+	sendData();
+}
+
+PUSH Play {
+
+	cmd = "*SCIRCC0000000000000078\x0A";
+	sendData();
+}
+
+PUSH Rewind {
+
+	cmd = "*SCIRCC0000000000000079\x0A";
+	sendData();
+}
+
+PUSH Prev {
+
+	cmd = "*SCIRCC0000000000000080\x0A";
+	sendData();
+}
+
+PUSH Stop {
+
+	cmd = "*SCIRCC0000000000000081\x0A";
+	sendData();
+}
+
+PUSH Next {
+
+	cmd = "*SCIRCC0000000000000082\x0A";
+	sendData();
+}
+
+PUSH Pause {
+
+	cmd = "*SCIRCC0000000000000084\x0A";
+	sendData();
+}
+
+PUSH Rec {
+
+	cmd = "*SCIRCC0000000000000083\x0A";
+	sendData();
+}
+
+PUSH Volume_Up {
+
+	cmd = "*SCIRCC0000000000000030\x0A";
+	sendData();
+}
+
+PUSH Volume_Down {
+
+	cmd = "*SCIRCC0000000000000031\x0A";
+	sendData();
+}
+              
+PUSH Red{
+
+	cmd = "*SCIRCC0000000000000014\x0A";
+	sendData();
+}
+
+PUSH Green{
+
+	cmd = "*SCIRCC0000000000000015\x0A";
+	sendData();
+}
+
+PUSH Yellow{
+
+	cmd = "*SCIRCC0000000000000016\x0A";
+	sendData();
+}
+
+PUSH Blue{
+	cmd = "*SCIRCC0000000000000017\x0A";
+	sendData();
+}
+ 
+ 
+
+
+CHANGE Volume_Set{
+                               
+	vol = Volume_Set;	
+	if(vol<10)
+		cmd = "*SCVOLU000000000000000"+itoa(vol)+"\x0A";
+	else if(vol<99)
+		cmd = "*SCVOLU00000000000000"+itoa(vol)+"\x0A";
+	else			
+    	cmd = "*SCVOLU0000000000000"+itoa(vol)+"\x0A";
+	sendData();
+
+	printDeb ("Vol = ", itoa(vol));
+ 	printDeb ("Volume_Set = ", itoa(Volume_Set));
+
+}
+
+
+
+CHANGE RX$ {
+	cmd = RX$;
+	sendData();
+}
+
+
+
+
+/*
+  HTTP Requests Protocol
+
+*/
+
+THREADSAFE PUSH Netflix
+{
+	HTTP_Driver.selectApp("com.sony.dtv.com.netflix.ninja.com.netflix.ninja.MainActivity");
+}
+
+THREADSAFE PUSH YouTube
+{
+	HTTP_Driver.selectApp("com.sony.dtv.com.google.android.youtube.tv.com.google.android.apps.youtube.tv.activity.ShellActivity");
+}
+
+THREADSAFE PUSH AppleTV
+{
+	HTTP_Driver.selectApp("com.sony.dtv.com.apple.atve.sony.appletv.com.apple.atve.sony.appletv.MainActivity");
+}
+
+THREADSAFE PUSH DisneyPlus
+{
+	HTTP_Driver.selectApp("com.sony.dtv.com.disney.disneyplus.com.bamtechmedia.dominguez.main.MainActivity");
+}
+
+THREADSAFE CHANGE CustomApp
+{
+  	HTTP_Driver.selectApp(CustomApp);
+}
+
+THREADSAFE CHANGE Print_Logs
+{
+	HTTP_Driver.setDebugLevel(Print_Logs);
+}
+
+/*******************************************************************************************
+  Main()
+*******************************************************************************************/
+
+Function Main()
+{
+    
+    WaitForInitializationComplete();
+    
+
+	HTTP_Driver.Initialize(IP_address, Pre_Shared_Key);
+}
